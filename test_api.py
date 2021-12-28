@@ -69,11 +69,12 @@ async def upload_image(style_number: int, file: UploadFile = File(...)):
 
 if __name__ == '__main__':
 
-    segmentic_net = SegmentationNet()
+
     opt = cfg
     use_gpu = True if len(opt.gpu_ids) > 0 else False
     device = torch.device(f'cuda:{opt.gpu_ids[0]}') if len(opt.gpu_ids) > 0 else 'cpu'
     ckpt = torch.load('checkpoints/CelebA-HQ_pretrained/54_net_G.pth', map_location=device)
+    segmentic_net = SegmentationNet(device)
     model_G = SPADEGenerator(opt)
     model_G.cuda() if use_gpu else model_G.cpu()
     model_G.load_state_dict(ckpt)

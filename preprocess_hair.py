@@ -11,14 +11,13 @@ from PIL import Image
 from matplotlib import pyplot as plt
 import random
 import time
-
+from config import cfg
 
 def load_input_feature(file_name,use_gpu):
     ############### load average features
 
     average_style_code_folder = 'styles_test/mean_style_code/mean/'
     input_style_code_folder = 'styles_test/style_codes/' + os.path.basename(file_name.replace('png','jpg'))
-    #print(f'input_style_code_folder:  {input_style_code_folder}')
     input_style_dic = {}
     label_count = []
 
@@ -167,32 +166,97 @@ def tensor2im(image_tensor, imtype=np.uint8, normalize=True, tile=False):
 
 
 
-def main(opt):
+def prepare_data(path_src,style_num,label_img,opt,use_gpu):
+    fileStyleHair = f'{style_num}.jpg'
+    image_path = path_src
+    instance_tensor = torch.Tensor([0])
 
-    opt.status = 'UI_mode'
+    label = Image.fromarray(label_img)
+    params = get_params(opt, label.size)
+    transform_label = get_transform(opt, params, method=Image.NEAREST, normalize=False)
+    label_tensor = transform_label(label) * 255.0
+    label_tensor[label_tensor == 255] = opt.label_nc  # 'unknown' is opt.label_nc
+    label_tensor.unsqueeze_(0)
+    obj_dic = load_average_feature(use_gpu)
+
+    image = Image.open(image_path)
+    image = image.convert('RGB')
+    transform_image = get_transform(opt, params)
+    image_tensor = transform_image(image)
+    image_tensor.unsqueeze_(0)
+    input_dict = {'label': label_tensor,
+                  'instance': instance_tensor,
+                  'image': image_tensor,
+                  'path': image_path,
+                  'obj_dic': obj_dic
+                  }
+    input_semantics, real_image = preprocess_input(input_dict, use_gpu, opt)
+    obj_dic = input_dict['obj_dic']
+    input_style_hair_code_folder = "styles_test/style_codes/" + fileStyleHair
+    if use_gpu:
+        style_hair = torch.from_numpy(
+            np.load(os.path.join(input_style_hair_code_folder, str(1), 'ACE' + '.npy'))).cuda()
+    else:
+        style_hair = torch.from_numpy(np.load(os.path.join(input_style_hair_code_folder, str(1), 'ACE' + '.npy')))
+    obj_dic[str(1)]["ACE"] = style_hair
+
+    return input_semantics,real_image,obj_dic
+
+def blend_image(foreground,background,alpha):
+
+    foreground = foreground.astype(float)
+    background = background.astype(float)
+
+    # Normalize the alpha mask to keep intensity between 0 and 1
+    alpha = alpha.astype(float) / 255
+
+    # Multiply the foreground with the alpha matte
+    foreground = cv2.multiply(alpha, foreground)
+
+    # Multiply the background with ( 1 - alpha )
+    background = cv2.multiply(1.0 - alpha, background)
+
+    # Add the masked foreground and background.
+    outImage = cv2.add(foreground, background)
+    cv2.imwrite("final_image_blend.jpg", outImage)
+def make_mask_bigger(mask):
+    label = mask.copy()
+    label[np.where(label == 1)] = 255
+    # cv2.imshow('label',label)
+    label_gray = cv2.cvtColor(label, cv2.COLOR_BGR2GRAY)
+    a, thresh = cv2.threshold(label_gray, 60, 255, cv2.THRESH_BINARY)
+    contours, hier = cv2.findContours(thresh, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    cv2.drawContours(image=mask, contours=contours, contourIdx=-1, color=(1, 1, 1), thickness=5,
+                     lineType=cv2.LINE_AA)
+    return mask
+
+
+def main():
+    opt = TestOptions().parse()
+    opt.status = 'Test_mode'
     time_run_st = time.time()
     use_gpu = False
     if len(opt.gpu_ids) > 0:
         use_gpu = True
-        device =torch.device(f'cuda:{opt.gpu_ids[0]}')
+        device = torch.device(f'cuda:{opt.gpu_ids[0]}')
     else:
         device = 'cpu'
-    fileName = opt.src_img + ".png"
-    #fileStyleHair = random.choice(os.listdir("styles_test/style_codes"))
-    fileStyleHair = "28645.jpg"
-    mat_img_path = os.path.join(opt.label_dir, os.path.basename(fileName))
-
-
+    fileName = "20075" + ".png"
+    fileStyleHair = random.choice(os.listdir("styles_test/style_codes"))
+    print(f'fileStyleHair: {fileStyleHair}')
+    #fileStyleHair = "28066.jpg"
+    #print(f'fileStyleHair: {fileStyleHair}')
+    #fileStyleHair = "29986.jpg"
+    #mat_img_path = os.path.join(opt.label_dir, os.path.basename(fileName))
+    mat_img_path = "new_label_29258.png"
     GT_img_path = os.path.join(opt.image_dir, os.path.basename(fileName)[:-4] + '.jpg')
     image_path = GT_img_path
     instance_tensor = torch.Tensor([0])
 
-
-
     target_path = os.path.join(opt.label_dir, os.path.basename(fileName))
-    reference_path = os.path.join(opt.label_dir,os.path.basename(fileStyleHair.replace('.jpg','.png')))
+    reference_path = os.path.join(opt.label_dir, os.path.basename(fileStyleHair.replace('.jpg', '.png')))
 
-    #print(f'target path : {target_path} \n refer path: {reference_path}')
+    # print(f'target path : {target_path} \n refer path: {reference_path}')
     mat_img = cv2.imread(mat_img_path)
 
     label_img = mat_img[:, :, 0]
@@ -202,13 +266,11 @@ def main(opt):
     label_tensor = transform_label(label) * 255.0
     label_tensor[label_tensor == 255] = opt.label_nc  # 'unknown' is opt.label_nc
     label_tensor.unsqueeze_(0)
+    print(f'label_tensor.shape: {label_tensor.shape}')
 
-
-
-    #obj_dic = load_average_feature()
+    print(f'opt: {opt}')
+    # obj_dic = load_average_feature()
     obj_dic = load_average_feature(use_gpu)
-
-
 
     image = Image.open(image_path)
     image = image.convert('RGB')
@@ -216,53 +278,46 @@ def main(opt):
     image_tensor = transform_image(image)
     image_tensor.unsqueeze_(0)
 
-
-
     input_dict = {'label': label_tensor,
-                    'instance': instance_tensor,
-                    'image': image_tensor,
-                    'path': image_path,
-                    'obj_dic': obj_dic
+                  'instance': instance_tensor,
+                  'image': image_tensor,
+                  'path': image_path,
+                  'obj_dic': obj_dic
                   }
 
-    ckpt = torch.load('checkpoints/CelebA-HQ_pretrained/latest_net_G.pth',map_location=device)
+    ckpt = torch.load('checkpoints/CelebA-HQ_pretrained/60_net_G.pth', map_location=device)
     model_G = SPADEGenerator(opt)
     if use_gpu:
         model_G.cuda()
     model_G.load_state_dict(ckpt)
     model_G.eval()
-    input_semantics, real_image = preprocess_input(input_dict,use_gpu,opt)
+    input_semantics, real_image = preprocess_input(input_dict, use_gpu, opt)
     obj_dic = input_dict['obj_dic']
-    input_style_hair_code_folder = "styles_test/style_codes/" +fileStyleHair
+    input_style_hair_code_folder = "styles_test/style_codes/" + fileStyleHair
     if use_gpu:
-        style_hair = torch.from_numpy(np.load(os.path.join(input_style_hair_code_folder, str(13), 'ACE' + '.npy'))).cuda()
+        style_hair = torch.from_numpy(
+            np.load(os.path.join(input_style_hair_code_folder, str(1), 'ACE' + '.npy'))).cuda()
     else:
-        style_hair = torch.from_numpy(np.load(os.path.join(input_style_hair_code_folder, str(13), 'ACE' + '.npy')))
+        style_hair = torch.from_numpy(np.load(os.path.join(input_style_hair_code_folder, str(1), 'ACE' + '.npy')))
 
-    obj_dic[str(13)]["ACE"] = style_hair
+    obj_dic[str(1)]["ACE"] = style_hair
     st = time.time()
-    fake_image = model_G(input_semantics,real_image,obj_dic)
+    fake_image = model_G(input_semantics, real_image, obj_dic)
     ed = time.time()
-    fps = 1/(ed-st) if ed > st else 0
-    rs = tensor2im(fake_image,tile=False)[0]
-    rs = rs[...,::-1]
+    fps = 1 / (ed - st) if ed > st else 0
+    rs = tensor2im(fake_image, tile=False)[0]
+    rs = rs[..., ::-1]
     print(f'FPS: {fps}')
-    print(f'Time excute: {ed-st}')
-    cv2.imshow('rs',rs)
-    cv2.imwrite('result.jpg',rs)
+    print(f'Time excute: {ed - st}')
+    # cv2.imshow('rs',rs)
+    cv2.imwrite('result.jpg', rs)
     time_run_ed = time.time()
     print(f'Time running etry :  {time_run_ed - time_run_st}')
-    #path_org_img = "datasets/CelebA-HQ/test/images/" + fileName.replace('png','jpg')
-    #source_img = cv2.imread(path_org_img)
-    #cv2.imshow('source',cv2.resize(cv2.imread(path_org_img),(256,256)))
-    path_style_img = "datasets/CelebA-HQ/test/images/" + fileStyleHair
-    print(f'path style img: {path_style_img}')
-    #cv2.imshow('style',cv2.resize(cv2.imread(path_style_img),(256,256)))
-    cv2.imwrite('style.jpg',cv2.resize(cv2.imread(path_style_img),(256,256)))
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+
+
+
+
 
 if __name__ == "__main__":
-    opt = TestOptions().parse()
-    main(opt)
+    main()
 

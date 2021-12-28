@@ -116,7 +116,7 @@ class ACE(nn.Module):
     def forward(self, x, segmap, style_codes=None, obj_dic=None):
 
         # Part 1. generate parameter-free normalized activations
-        added_noise = (torch.randn(x.shape[0], x.shape[3], x.shape[2], 1).cuda() * self.noise_var).transpose(1, 3)
+        added_noise = (torch.randn(x.shape[0], x.shape[3], x.shape[2], 1) * self.noise_var).transpose(1, 3)
         normalized = self.param_free_norm(x + added_noise)
 
         # Part 2. produce scaling and bias conditioned on semantic map

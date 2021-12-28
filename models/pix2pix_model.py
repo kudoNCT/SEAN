@@ -39,7 +39,6 @@ class Pix2PixModel(torch.nn.Module):
     # routines based on |mode|.
     def forward(self, data, mode):
         input_semantics, real_image = self.preprocess_input(data)
-
         if mode == 'generator':
             g_loss, generated = self.compute_generator_loss(
                 input_semantics, real_image)
@@ -83,7 +82,6 @@ class Pix2PixModel(torch.nn.Module):
         else:
             beta1, beta2 = 0, 0.9
             G_lr, D_lr = opt.lr / 2, opt.lr * 2
-
         optimizer_G = torch.optim.Adam(G_params, lr=G_lr, betas=(beta1, beta2))
         optimizer_D = torch.optim.Adam(D_params, lr=D_lr, betas=(beta1, beta2))
 

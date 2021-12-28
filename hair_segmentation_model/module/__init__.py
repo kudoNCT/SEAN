@@ -13,8 +13,8 @@ import os
 
 
 class SegmentationNet():
-    def __init__(self, im_size=513, model_face_detection='500m'):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    def __init__(self, device,im_size=513, model_face_detection='500m'):
+        self.device = device
         weights_folder = glob.glob('hair_segmentation_model/module/save_weights/skin_hair/*.pt')[0]
 
         checkpoint = torch.load(weights_folder,map_location=self.device)
